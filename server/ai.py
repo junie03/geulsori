@@ -84,6 +84,29 @@ async def refine(text: str, history) -> str:
     return out.refined.strip()
 
 
+# ---------- 통화 중: 보이스피싱 경고 ----------
+
+class ScamCheck(BaseModel):
+    level: Literal["안전", "주의", "위험"]
+    reason: str
+
+
+async def scam_check(history) -> dict:
+    prompt = (
+        f"통화 기록:\n{_transcript(history[-12:])}\n\n"
+        "'상대'가 보이스피싱(전화 금융사기)을 시도하는지 판단하라.\n"
+        "- 위험: 수사기관·금융기관·가족 등을 사칭하며 돈·계좌·인증번호·비밀번호·카드 정보를 요구하거나, "
+        "앱 설치·원격 제어·링크 접속, 안전계좌 이체, 현금 전달, 상품권 구매를 요구하는 경우.\n"
+        "- 주의: 위 신호가 일부 보이지만 정상 업무일 가능성도 있는 경우(예: 기관을 자칭하며 개인정보를 묻는 경우, "
+        "아직 요구 없이 수사기관·금융기관이라고 소개만 한 경우).\n"
+        "- 안전: 예약 안내, 결제 금액 안내처럼 평범한 대화.\n"
+        "'나'의 말이 아니라 상대의 요구만 근거로 판단하고, 음성 인식 오타를 감안하라. "
+        "reason은 상대가 한 말 중 의심스러운 점을 짚어 30자 이내 한 문장으로 써라."
+    )
+    out = await _ask(BASE, prompt, ScamCheck, 500)
+    return out.model_dump()
+
+
 # ---------- 통화 전: 통화 준비 도우미 ----------
 
 class QA(BaseModel):
