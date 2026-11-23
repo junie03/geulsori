@@ -28,6 +28,16 @@ python -m uvicorn server.main:app --port 8000
 - 휴대폰 테스트: `ngrok http 8000`으로 만든 HTTPS 주소로 접속 (휴대폰 브라우저는 HTTPS에서만 마이크 허용)
 - 일반 전화는 Twilio 키 3개가 있고 ngrok 같은 공개 HTTPS 주소로 접속했을 때만 켜짐
 
+## 배포 (Render)
+- 주소: **https://geulsori.onrender.com** (HTTPS라 휴대폰에서도 마이크 사용 가능)
+- `main` 브랜치에 push하면 Render가 자동으로 다시 배포한다. 설정은 [`render.yaml`](render.yaml)에 있다.
+- 처음 만들 때: Render 대시보드 → New → Blueprint → 이 저장소 선택. 또는 Web Service를 만들고 아래처럼 입력
+  - Build Command: `pip install -r requirements.txt`
+  - Start Command: `uvicorn server.main:app --host 0.0.0.0 --port $PORT`
+- `ANTHROPIC_API_KEY`는 Render 대시보드 → Environment에서 직접 입력한다(저장소에 넣지 않음).
+- 무료 플랜은 15분간 접속이 없으면 잠들고, 다음 접속 때 깨어나는 데 약 1분 걸린다. 시연 1~2분 전에 주소를 미리 열어 둔다.
+- 서버를 다시 시작하면 메모리에 있던 번호·접속 정보가 초기화된다.
+
 ## WebSocket 메시지
 | 보냄 | 받음 |
 |---|---|
