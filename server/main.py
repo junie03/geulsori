@@ -221,11 +221,18 @@ async def start_phone_call(me: User, raw: str, base: str) -> None:
     phone_calls[p.id] = p
     me.pending = p
     await me.send({"type": "ringing", "peer": p.info()})
+    greeting = (
+        f"안녕하세요. {me.name}님이 자막 통화 서비스로 거신 전화입니다. "
+        "상대방은 말씀을 자막으로 보고 글로 답하니, 천천히 말씀해 주세요."
+    )
     try:
+        # 첫 안내 TwiML은 전화를 만들 때 직접 넘긴다(체험 계정은 첫 TwiML 요청에 서명이 없어 검증할 수 없음).
+        # 받았는지는 서명이 붙는 상태 알림(answered)으로 알고, 이후 웹훅은 모두 서명 검증을 거친다.
         call = await asyncio.to_thread(
             twilio().calls.create,
             to=to, from_=os.getenv("TWILIO_PHONE_NUMBER"),
-            url=p.url("/twilio/voice"), status_callback=p.url("/twilio/status"),
+            twiml=p.gather(greeting), status_callback=p.url("/twilio/status"),
+            status_callback_event=["answered", "completed"],
         )
         p.sid = call.sid
     except Exception as e:
@@ -253,21 +260,15 @@ def twiml(xml: str) -> Response:
     return Response(xml, media_type="application/xml")
 
 
-@app.post("/twilio/voice")
-async def twilio_voice(request: Request):
-    """상대가 전화를 받았을 때"""
-    p, _ = await twilio_request(request)
-    if not p or not p.pending:
-        return twiml(HANGUP)
+async def phone_answered(p: PhonePeer) -> None:
+    """상대가 전화를 받음 → 앱 사용자와 연결"""
+    if not p.pending:
+        return
     user = p.pending
     user.pending = p.pending = None
     user.peer, p.peer = p, user
     p.answered = True
     await user.send({"type": "connected", "peer": p.info(), "role": "caller"})
-    return twiml(p.gather(
-        f"안녕하세요. {user.name}님이 자막 통화 서비스로 거신 전화입니다. "
-        "상대방은 말씀을 자막으로 보고 글로 답하니, 천천히 말씀해 주세요."
-    ))
 
 
 @app.post("/twilio/partial")
@@ -275,6 +276,8 @@ async def twilio_partial(request: Request):
     """상대가 말하는 중간 결과 → 점선 자막"""
     p, form = await twilio_request(request)
     text = (form.get("UnstableSpeechResult") or form.get("StableSpeechResult") or "").strip()
+    if p:
+        await phone_answered(p)  # 받음 알림보다 먼저 도착해도 연결
     if p and p.peer and text:
         await p.peer.send({"type": "caption", "text": text, "final": False, "from": p.number})
     return Response(status_code=204)
@@ -284,6 +287,8 @@ async def twilio_partial(request: Request):
 async def twilio_gather(request: Request):
     """상대 말 한 마디가 끝났을 때 → 확정 자막, 다시 듣기"""
     p, form = await twilio_request(request)
+    if p:
+        await phone_answered(p)
     if not p or not p.peer:
         return twiml(HANGUP)
     text = (form.get("SpeechResult") or "").strip()
@@ -294,11 +299,13 @@ async def twilio_gather(request: Request):
 
 @app.post("/twilio/status")
 async def twilio_status(request: Request):
-    """통화가 끝났을 때(상대가 끊음, 안 받음, 실패)"""
+    """상대가 받았을 때(in-progress), 통화가 끝났을 때(상대가 끊음, 안 받음, 실패)"""
     p, form = await twilio_request(request)
-    if p:
+    status = form.get("CallStatus", "")
+    if p and status == "in-progress":
+        await phone_answered(p)
+    elif p:
         phone_calls.pop(p.id, None)
-        status = form.get("CallStatus", "")
         reason = "hangup" if p.answered else ("rejected" if status in ("busy", "no-answer", "canceled") else "disconnected")
         await end_call(p, reason)
     return Response(status_code=204)
